@@ -3,6 +3,7 @@ import type {
   ColumnMapping,
   InventoryEntry,
   FolderNode,
+  FileNode,
   InventoryStats,
   SizeDistributionBucket,
   EntryMetadata,
@@ -189,7 +190,9 @@ function mapRowToEntry(
   }
 
   return {
-    id: `${index}-${normalizedPath.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 50)}`,
+    // Keep the id compact: a plain index is unique and avoids retaining a ~50-char
+    // sanitized-path string per row (tens of MB across 400k+ rows).
+    id: String(index),
     path: normalizedPath,
     name: name || getNameFromPath(normalizedPath),
     type,
@@ -270,18 +273,12 @@ function buildFolderTree(entries: InventoryEntry[]): FolderNode {
       parent = ensureParentFolders(folderMap, parentPath, root);
     }
 
-    const fileNode = {
-      path: file.path,
-      name: file.name,
-      type: 'file' as const,
-      size: file.size,
-      extension: file.extension,
-      modified: file.modified,
-      depth: file.depth,
-      metadata: file.metadata,
-    };
-
-    parent.children.set(fileNode.name, fileNode);
+    // Reuse the entry object itself as the tree's file node instead of
+    // allocating a second object per file. InventoryEntry is a structural
+    // superset of FileNode, so this is safe at runtime and lets structuredClone
+    // share a single copy across `entries` and the tree when posting back to
+    // the main thread — roughly halving peak/transfer memory for large inventories.
+    parent.children.set(file.name, file as unknown as FileNode);
     parent.directChildren++;
   }
 
